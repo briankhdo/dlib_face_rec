@@ -1,0 +1,285 @@
+<html>
+	<head>
+		<script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+		<script
+			src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js"
+			integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo"
+			crossorigin="anonymous"
+		></script>
+		<link
+			rel="stylesheet"
+			href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/css/bootstrap.min.css"
+			integrity="sha384-9aIt2nRpC12Uk9gS9baDl411NQApFmC26EwAOH8WgZl5MYYxFfc+NcPb1dKGj7Sk"
+			crossorigin="anonymous"
+		/>
+		<script
+			src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.0/js/bootstrap.min.js"
+			integrity="sha384-OgVRvuATP1z7JjHLkuOU7Xw704+h835Lr+6QL9UvYjZE3Ipu6Tp75j7Bh/kR0JKI"
+			crossorigin="anonymous"
+		></script>
+	</head>
+	<body>
+		<div class="container-fluid">
+			<h1>Face recognition</h1>
+			<em>Session ID: {{uuid}}</em><br />
+			<div class="row faces"></div>
+			<button id="save" class="btn btn-primary" style="visibility: hidden;">
+				Save face data</button
+			><br />
+			<div class="row">
+				<div class="col col-md-6 text-right">
+					<video
+						id="video"
+						width="640"
+						height="480"
+						autoplay
+						muted
+						playsinline
+					></video>
+				</div>
+				<div class="col col-md-6">
+					<div class="result" style="display: inline-block;"></div>
+				</div>
+			</div>
+			<br />
+			<button id="snap" class="btn btn-primary">Add FaceID</button>
+			<button id="auto" class="btn btn-success">Start Recognization</button>
+			<br />
+			<canvas
+				id="canvas"
+				width="640"
+				height="480"
+				style="display: none;"
+			></canvas>
+		</div>
+		<script>
+			// Grab elements, create settings, etc.
+			var video = document.getElementById("video");
+			var width = 640;
+			var height = 480;
+			var facingMode = "user";
+			var aspectRatio = undefined;
+
+			// Get access to the camera!
+			if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+				// Not adding `{ audio: true }` since we only want video now
+				navigator.mediaDevices
+					.getUserMedia({ video: true })
+					.then(function (stream) {
+						//video.src = window.URL.createObjectURL(stream);
+						video.srcObject = stream;
+						settings = stream.getTracks()[0].getSettings();
+						facingMode = settings.facingMode;
+						aspectRatio = settings.aspectRatio;
+						if (
+							/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+								navigator.userAgent
+							)
+						) {
+							height = settings.width;
+							width = settings.height;
+						} else {
+							width = settings.width;
+							height = settings.height;
+						}
+						canvas.width = width;
+						canvas.height = height;
+						video.width = width;
+						video.height = height;
+					});
+			}
+
+			/* Legacy code below: getUserMedia
+			else if(navigator.getUserMedia) { // Standard
+				navigator.getUserMedia({ video: true }, function(stream) {
+					video.src = stream;
+					video.play();
+				}, errBack);
+			} else if(navigator.webkitGetUserMedia) { // WebKit-prefixed
+				navigator.webkitGetUserMedia({ video: true }, function(stream){
+					video.src = window.webkitURL.createObjectURL(stream);
+					video.play();
+				}, errBack);
+			} else if(navigator.mozGetUserMedia) { // Mozilla-prefixed
+				navigator.mozGetUserMedia({ video: true }, function(stream){
+					video.srcObject = stream;
+					video.play();
+				}, errBack);
+			}
+			*/
+
+			// Elements for taking the snapshot
+			var canvas = document.getElementById("canvas");
+			var context = canvas.getContext("2d");
+			var video = document.getElementById("video");
+
+			// Trigger photo take
+			$(document).ready(function () {
+				var interval = undefined;
+
+				$.get("/faces", function (response) {
+					renderFaces(response);
+				});
+
+				$(document).on("keyup", "input[name=name]", function () {
+					$("#save").css("visibility", "visible");
+				});
+
+				document.getElementById("snap").addEventListener("click", function () {
+					context.drawImage(video, 0, 0, width, height);
+
+					image = context.getImageData(0, 0, width, height);
+
+					var array = [];
+					for (var i = 0; i < image.length; i++) {
+						array.push(image.charCodeAt(i));
+					}
+					var file = canvas.toBlob(
+						function (blob) {
+							var formdata = new FormData();
+							formdata.append("image", blob);
+							$.ajax({
+								url: "reg",
+								type: "POST",
+								data: formdata,
+								processData: false,
+								contentType: false,
+							}).done(function (respond) {
+								image_data = respond.data;
+								var image = new Image();
+								image.onload = function () {
+									context.drawImage(image, 0, 0);
+								};
+								image.src = "data:image/png;base64," + image_data;
+
+								var faces = respond.faces;
+								var descriptors = respond.descriptors;
+								for (var i in faces) {
+									var face = faces[i];
+									$(".faces").append(
+										'<div class="col col-md-2"><img src="data:image/png;base64,' +
+											face +
+											'" width="100%"/><br/><input class="form-control" name="name" placeholder="Face\'s name" id="face_' +
+											i +
+											'"/><input type="hidden" name="descriptor" value="' +
+											descriptors[i] +
+											'" /></div>'
+									);
+								}
+
+								$("#save").css("visibility", "visible");
+							});
+						},
+						"image/jpeg",
+						0.95
+					);
+				});
+
+				// document.getElementById("check").addEventListener("click", function () {
+				// 	checkPhoto();
+				// });
+
+				document.getElementById("auto").addEventListener("click", function () {
+					if (interval) {
+						clearInterval(interval);
+						interval = undefined;
+						$(this)
+							.addClass("btn-success")
+							.removeClass("btn-danger")
+							.text("Start Recognization");
+					} else {
+						interval = setInterval(checkPhoto, 2000);
+						$(this)
+							.removeClass("btn-success")
+							.addClass("btn-danger")
+							.text("Stop Recognization");
+					}
+				});
+
+				function checkPhoto() {
+					context.drawImage(video, 0, 0, width, height);
+
+					image = context.getImageData(0, 0, width, height);
+
+					var array = [];
+					for (var i = 0; i < image.length; i++) {
+						array.push(image.charCodeAt(i));
+					}
+					var file = canvas.toBlob(
+						function (blob) {
+							var formdata = new FormData();
+							formdata.append("image", blob);
+							$.ajax({
+								url: "check",
+								type: "POST",
+								data: formdata,
+								processData: false,
+								contentType: false,
+							}).done(function (respond) {
+								image_data = respond.data;
+								var image = new Image();
+								image.onload = function () {
+									context.drawImage(image, 0, 0);
+								};
+								image.src = "data:image/png;base64," + image_data;
+								image.width = width;
+
+								$(".result").empty().append(image);
+							});
+						},
+						"image/jpeg",
+						0.95
+					);
+				}
+
+				document.getElementById("save").addEventListener("click", function () {
+					// collect data
+					var data = [];
+					$(".faces .col").each(function () {
+						if ($(this).find("input").val().length > 0)
+							data.push({
+								image: $(this)
+									.find("img")
+									.attr("src")
+									.replace("data:image/png;base64,", ""),
+								name: $(this).find("input[name=name]").val(),
+								descriptor: $(this).find("input[name=descriptor]").val(),
+							});
+					});
+
+					$.ajax({
+						url: "save",
+						type: "POST",
+						data: JSON.stringify(data),
+						processData: false,
+						contentType: "application/json",
+					}).done(function (response) {
+						renderFaces(response);
+						$("#save").css("visibility", "hidden");
+					});
+				});
+
+				function renderFaces(data) {
+					var faces = data;
+					$(".faces").empty();
+					for (var i in faces) {
+						var face = faces[i].image;
+						var name = faces[i].name;
+						var descriptor = faces[i].descriptor;
+						$(".faces").append(
+							'<div class="col col-md-2"><img src="data:image/png;base64,' +
+								face +
+								'" width="100%"/><br/><input class="form-control" name="name" placeholder="Face\'s name" id="face_' +
+								i +
+								'" value="' +
+								name +
+								'"/><input type="hidden" name="descriptor" value="' +
+								descriptor +
+								'" /></div>'
+						);
+					}
+				}
+			});
+		</script>
+	</body>
+</html>
